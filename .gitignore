@@ -1,0 +1,7 @@
+build/
+.venv/
+__pycache__/
+phase1_results.csv
+phase1_report/
+*.o
+*.dSYM/
