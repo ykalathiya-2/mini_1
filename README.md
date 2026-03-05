@@ -1,58 +1,49 @@
-# mini_1 — Memory Overload (Phase 1)
+# mini\_1 — Memory Overload
 
-Serial C++ library + benchmark for the 2017 Yellow Taxi Trip dataset.
+Performance study on the 2017 Yellow Taxi Trip dataset (113M rows, ~14.5 GB).
+Built in two phases: serial baseline, then OpenMP parallel.
 
-## What's here
+## Layout
 
-- CSV parser that loads all 17 columns into row-based (`TaxiTrip`) structs
-- Virtual interfaces (`IDataReader`, `IDataStore`, `IQueryEngine`) for extensibility
-- Template `range_scan<>` for generic numeric field queries
-- `DataFacade` that wires everything together
-- Benchmark executable with CPU / memory / timing instrumentation
-- Python plotting pipeline (seaborn SVG charts + HTML report)
+| Directory | What it does |
+|-----------|--------------|
+| `phase-1/` | Serial C++ library + benchmark (AoS, virtual interfaces, templates, facade) |
+| `phase-2/` | OpenMP parallel CSV reader + parallel query engine, speedup measurement |
 
-## Build
+## Quick start
+
+### Phase 1 (serial)
 
 ```bash
+cd phase-1
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-```
-
-## Run benchmark
-
-```bash
-# defaults: trip_distance in [1, 3], 10 repeats
 ./build/benchmark_phase1 ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv
-
-# custom query
-./build/benchmark_phase1 ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv fare_amount 10 50 10
-
-# machine-readable CSV row
-./build/benchmark_phase1 ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv trip_distance 1 3 10 --csv
 ```
 
-## Collect multiple runs
+### Phase 2 (parallel, needs Homebrew LLVM + libomp on macOS)
 
 ```bash
-./scripts/run_phase1_benchmark.sh ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv 10 trip_distance 1 3
+cd phase-2
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm@20/bin/clang++
+cmake --build build -j
+./build/benchmark_phase2 ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv
 ```
 
-## Full pipeline (benchmark + plots + report)
+## Dataset
 
-```bash
-./scripts/run_phase1_pipeline.sh ~/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv 10 trip_distance 1 3 phase1_report
-```
+NYC 2017 Yellow Taxi Trip Data — 17 columns, ~113.5M rows.
+Download from the NYC Open Data portal.
 
-## Generate graphs separately
+## Requirements
 
-```bash
-pip install -r scripts/requirements.txt
-python3 scripts/plot_phase1_benchmark.py --input phase1_results.csv --outdir phase1_report
-```
-
-Outputs under `phase1_report/`: summary_stats.csv, time_trends.svg, cpu_trends.svg, memory_trend.svg, distributions.svg, report.html.
+- C++20 compiler (AppleClang 17+ for Phase 1, LLVM clang++ 20 for Phase 2)
+- CMake 3.20+
+- OpenMP (`brew install libomp llvm@20` on macOS)
+- Python 3.10+ with pandas, matplotlib, seaborn (for plotting)
 
 ## Notes
 
-- Phase 1 is serial only — no threads or OpenMP.
-- Memory reporting uses `task_vm_info.phys_footprint` on macOS (matches Activity Monitor).
+- Memory is measured via `task_vm_info.phys_footprint` (macOS).
+- Phase-specific docs live in each directory's own README.

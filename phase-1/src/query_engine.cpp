@@ -12,7 +12,6 @@ std::vector<std::size_t> QueryEngine::range_search(
     auto lo = query.low, hi = query.high;
     bool inc = query.inclusive;
 
-    // Each branch instantiates range_scan with a different accessor lambda.
     if (col == "vendor_id" || col == "VendorID")
         return range_scan(store, [](const TaxiTrip& r){ return r.vendor_id; }, lo, hi, inc);
     if (col == "passenger_count")

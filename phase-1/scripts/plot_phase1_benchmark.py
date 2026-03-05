@@ -53,27 +53,13 @@ def load_data(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
     numeric_cols = [
-        "run",
-        "low",
-        "high",
-        "query_repeats",
-        "load_ms",
-        "query_total_ms",
-        "avg_query_ms",
-        "last_hits",
-        "total_rows",
-        "valid_rows",
-        "invalid_rows",
-        "load_cpu_user_ms",
-        "load_cpu_sys_ms",
-        "load_cpu_total_ms",
-        "query_cpu_user_ms",
-        "query_cpu_sys_ms",
-        "query_cpu_total_ms",
-        "load_peak_rss_bytes",
-        "load_footprint_bytes",
-        "query_peak_rss_bytes",
-        "query_footprint_bytes",
+        "run", "low", "high", "query_repeats",
+        "load_ms", "query_total_ms", "avg_query_ms", "last_hits",
+        "total_rows", "valid_rows", "invalid_rows",
+        "load_cpu_user_ms", "load_cpu_sys_ms", "load_cpu_total_ms",
+        "query_cpu_user_ms", "query_cpu_sys_ms", "query_cpu_total_ms",
+        "load_peak_rss_bytes", "load_footprint_bytes",
+        "query_peak_rss_bytes", "query_footprint_bytes",
         "overall_peak_rss_bytes",
     ]
 
@@ -87,13 +73,9 @@ def load_data(csv_path: Path) -> pd.DataFrame:
 
 def write_summary(df: pd.DataFrame, outdir: Path) -> Path:
     metric_cols = [
-        "load_ms",
-        "query_total_ms",
-        "avg_query_ms",
-        "load_cpu_total_ms",
-        "query_cpu_total_ms",
-        "overall_peak_rss_bytes",
-        "load_footprint_bytes",
+        "load_ms", "query_total_ms", "avg_query_ms",
+        "load_cpu_total_ms", "query_cpu_total_ms",
+        "overall_peak_rss_bytes", "load_footprint_bytes",
     ]
 
     rows = []
@@ -101,18 +83,16 @@ def write_summary(df: pd.DataFrame, outdir: Path) -> Path:
         values = df[metric].dropna()
         if values.empty:
             continue
-        rows.append(
-            {
-                "metric": metric,
-                "count": int(values.count()),
-                "mean": values.mean(),
-                "stddev": values.std(ddof=1) if values.count() > 1 else 0.0,
-                "min": values.min(),
-                "p50": values.quantile(0.50),
-                "p95": values.quantile(0.95),
-                "max": values.max(),
-            }
-        )
+        rows.append({
+            "metric": metric,
+            "count": int(values.count()),
+            "mean": values.mean(),
+            "stddev": values.std(ddof=1) if values.count() > 1 else 0.0,
+            "min": values.min(),
+            "p50": values.quantile(0.50),
+            "p95": values.quantile(0.95),
+            "max": values.max(),
+        })
 
     summary = pd.DataFrame(rows)
     path = outdir / "summary_stats.csv"
@@ -196,18 +176,19 @@ def write_html_report(df: pd.DataFrame, summary_csv: Path, chart_paths: list[Pat
     mean_query = df["avg_query_ms"].mean()
     mean_cpu_load = df["load_cpu_total_ms"].mean()
     mean_cpu_query = df["query_cpu_total_ms"].mean()
-    mean_peak_gb = (df["overall_peak_rss_bytes"].mean()) / (1024 ** 3)
-    mean_footprint_gb = (df["load_footprint_bytes"].mean()) / (1024 ** 3) if "load_footprint_bytes" in df.columns else 0.0
+    mean_peak_gb = df["overall_peak_rss_bytes"].mean() / (1024 ** 3)
+    mean_footprint_gb = df["load_footprint_bytes"].mean() / (1024 ** 3) if "load_footprint_bytes" in df.columns else 0.0
 
     chart_imgs = "\n".join(
-        f'<h3>{path.stem.replace("_", " ").title()}</h3><img src="{path.name}" style="max-width:100%;height:auto;" />'
+        f'<h3>{path.stem.replace("_", " ").title()}</h3>'
+        f'<img src="{path.name}" style="max-width:100%;height:auto;" />'
         for path in chart_paths
     )
 
     html = f"""<!DOCTYPE html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
+  <meta charset="utf-8" />
   <title>Phase 1 Benchmark Report</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 24px; }}
@@ -219,15 +200,15 @@ def write_html_report(df: pd.DataFrame, summary_csv: Path, chart_paths: list[Pat
 </head>
 <body>
   <h1>Phase 1 Benchmark Report</h1>
-  <p>Rows in dataset (from run output): <b>{int(df['total_rows'].iloc[0]) if not df.empty else 0}</b></p>
+  <p>Rows in dataset: <b>{int(df['total_rows'].iloc[0]) if not df.empty else 0}</b></p>
   <h2>Summary KPIs</h2>
-  <div class=\"kpi\">Mean load time: <b>{mean_load:.3f} ms</b></div>
-  <div class=\"kpi\">Mean avg-query time: <b>{mean_query:.3f} ms</b></div>
-  <div class=\"kpi\">Mean load CPU total: <b>{mean_cpu_load:.3f} ms</b></div>
-  <div class=\"kpi\">Mean query CPU total: <b>{mean_cpu_query:.3f} ms</b></div>
-  <div class=\"kpi\">Mean overall peak RSS: <b>{mean_peak_gb:.3f} GB</b></div>
-  <div class=\"kpi\">Mean phys footprint (total alloc): <b>{mean_footprint_gb:.3f} GB</b></div>
-  <p>Detailed stats CSV: <code>{summary_csv.name}</code></p>
+  <div class="kpi">Mean load time: <b>{mean_load:.3f} ms</b></div>
+  <div class="kpi">Mean avg-query time: <b>{mean_query:.3f} ms</b></div>
+  <div class="kpi">Mean load CPU total: <b>{mean_cpu_load:.3f} ms</b></div>
+  <div class="kpi">Mean query CPU total: <b>{mean_cpu_query:.3f} ms</b></div>
+  <div class="kpi">Mean overall peak RSS: <b>{mean_peak_gb:.3f} GB</b></div>
+  <div class="kpi">Mean phys footprint: <b>{mean_footprint_gb:.3f} GB</b></div>
+  <p>Detailed stats: <code>{summary_csv.name}</code></p>
   <h2>Charts</h2>
   {chart_imgs}
 </body>

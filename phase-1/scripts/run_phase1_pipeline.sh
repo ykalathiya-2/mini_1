@@ -38,7 +38,6 @@ ensure_project_venv() {
   if [[ -x "$PYTHON_BIN" ]]; then
     return 0
   fi
-
   echo "Creating project virtual environment at $VENV_DIR"
   python3 -m venv "$VENV_DIR"
 }
@@ -52,7 +51,6 @@ PY
   then
     return 0
   fi
-
   echo "Plot dependencies missing; installing from $REQUIREMENTS_FILE"
   "$PYTHON_BIN" -m pip install -r "$REQUIREMENTS_FILE"
 }

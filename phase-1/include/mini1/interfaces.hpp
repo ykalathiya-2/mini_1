@@ -21,8 +21,6 @@ struct RangeQuery {
     bool        inclusive  = true;
 };
 
-// Abstract interfaces
-
 class IDataReader {
 public:
     virtual ~IDataReader() = default;

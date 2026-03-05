@@ -149,7 +149,6 @@ int main(int argc, char** argv) {
     }
     if (reps < 1) reps = 1;
 
-    // --- Load phase ---
     mini1::DataFacade data;
     auto u0 = snap();
     auto t0 = std::chrono::steady_clock::now();
@@ -163,7 +162,6 @@ int main(int argc, char** argv) {
     auto load_m = measure(u0, u1, load_ms);
     auto summary = data.load_summary();
 
-    // --- Query phase ---
     mini1::RangeQuery q{query_col, lo, hi, true};
     auto u2 = snap();
     auto t2 = std::chrono::steady_clock::now();

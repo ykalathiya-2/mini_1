@@ -5,7 +5,6 @@
 
 namespace mini1 {
 
-// One row of the Yellow Taxi trip dataset (AoS layout).
 struct TaxiTrip {
     int32_t     vendor_id             = 0;
     std::string pickup_datetime;

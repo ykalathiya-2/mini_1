@@ -19,7 +19,6 @@ std::string CsvReader::trim(const std::string& text) {
     return text.substr(begin, end - begin);
 }
 
-// RFC-4180 aware: handles quoted fields and escaped double-quotes.
 std::vector<std::string> CsvReader::parse_csv_line(const std::string& line) {
     std::vector<std::string> fields;
     std::string current;

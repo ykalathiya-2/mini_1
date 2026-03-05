@@ -6,7 +6,6 @@
 
 namespace mini1 {
 
-// Generic range scan over any numeric field — templated on the accessor.
 template <typename Accessor>
 std::vector<std::size_t> range_scan(const IDataStore& store,
                                     Accessor accessor,

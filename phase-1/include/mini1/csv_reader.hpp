@@ -13,7 +13,7 @@ public:
               std::vector<TaxiTrip>& rows_out,
               LoadSummary& summary_out) override;
 
-private:
+protected:
     static std::vector<std::string> parse_csv_line(const std::string& line);
     static std::string              trim(const std::string& text);
     static bool  try_parse_int32(const std::string& text, int32_t& value);

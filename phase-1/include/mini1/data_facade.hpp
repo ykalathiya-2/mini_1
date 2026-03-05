@@ -8,7 +8,6 @@
 
 namespace mini1 {
 
-// Facade — wires together reader, store, and query engine behind one API.
 class DataFacade {
 public:
     DataFacade();
