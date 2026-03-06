@@ -26,9 +26,9 @@ bool ParallelCsvReader::read(const std::string& source_path,
     int nt = (threads_ == 0) ? omp_get_max_threads() : threads_;
     std::streamoff data_size = file_size - data_start;
 
-    std::vector<std::vector<TaxiTrip>> partial_rows(nt);
-    std::vector<std::size_t> partial_valid(nt, 0);
-    std::vector<std::size_t> partial_invalid(nt, 0);
+    // Pass 1: each thread reads raw lines from its byte chunk.
+    std::vector<std::vector<std::string>> partial_lines(nt);
+    std::vector<std::size_t> counts(nt, 0);
 
     #pragma omp parallel num_threads(nt)
     {
@@ -54,27 +54,44 @@ bool ParallelCsvReader::read(const std::string& source_path,
         std::string line;
         while (std::getline(stream, line)) {
             pos += static_cast<std::streamoff>(line.size()) + 1;
+            partial_lines[tid].push_back(std::move(line));
+            if (tid < nt - 1 && pos >= chunk_end)
+                break;
+        }
+        counts[tid] = partial_lines[tid].size();
+    }
 
-            auto fields = parse_csv_line(line);
+    // Prefix sum to get each thread's write offset into the shared array.
+    std::vector<std::size_t> offsets(nt + 1, 0);
+    for (int i = 0; i < nt; ++i)
+        offsets[i + 1] = offsets[i] + counts[i];
+
+    std::size_t total = offsets[nt];
+    rows_out.clear();
+    rows_out.resize(total);
+
+    std::vector<std::size_t> partial_valid(nt, 0);
+    std::vector<std::size_t> partial_invalid(nt, 0);
+
+    // Pass 2: each thread parses its lines and writes directly into its slice.
+    #pragma omp parallel num_threads(nt)
+    {
+        int tid = omp_get_thread_num();
+        std::size_t idx = offsets[tid];
+
+        for (auto& raw : partial_lines[tid]) {
+            auto fields  = parse_csv_line(raw);
             TaxiTrip row = parse_row(fields);
 
             if (row.valid) ++partial_valid[tid];
             else           ++partial_invalid[tid];
 
-            partial_rows[tid].push_back(std::move(row));
-
-            if (tid < nt - 1 && pos >= chunk_end)
-                break;
+            rows_out[idx++] = std::move(row);
         }
-    }
 
-    std::size_t total = 0;
-    for (auto& p : partial_rows) total += p.size();
-    rows_out.clear();
-    rows_out.reserve(total);
-    for (auto& p : partial_rows)
-        for (auto& r : p)
-            rows_out.push_back(std::move(r));
+        // Free line buffer as soon as this thread is done with it.
+        std::vector<std::string>().swap(partial_lines[tid]);
+    }
 
     summary_out.total_rows   = total;
     summary_out.valid_rows   = 0;
