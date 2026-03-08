@@ -60,10 +60,36 @@ static Metrics diff(const Snap& before, const Snap& after, double wall_ms) {
     return m;
 }
 
+static RangeQuery parse_predicates(const std::string& spec) {
+    RangeQuery q;
+    std::istringstream ss(spec);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        auto p1 = tok.find(':');
+        auto p2 = tok.find(':', p1 + 1);
+        if (p1 == std::string::npos || p2 == std::string::npos) continue;
+        ColumnRange cr;
+        cr.column = tok.substr(0, p1);
+        cr.low    = std::stod(tok.substr(p1 + 1, p2 - p1 - 1));
+        cr.high   = std::stod(tok.substr(p2 + 1));
+        q.predicates.push_back(cr);
+    }
+    return q;
+}
+
+static std::string predicate_desc(const RangeQuery& q) {
+    std::ostringstream oss;
+    for (std::size_t i = 0; i < q.predicates.size(); ++i) {
+        if (i) oss << " AND ";
+        const auto& p = q.predicates[i];
+        oss << p.column << " in [" << p.low << ", " << p.high << "]";
+    }
+    return oss.str();
+}
+
 static void print_report(
         const std::string& csv_path,
-        const std::string& column,
-        double lo, double hi,
+        const RangeQuery& query,
         int reps, int threads,
         const LoadSummary& summary,
         const Metrics& load_p,
@@ -73,7 +99,7 @@ static void print_report(
     auto w = std::setw(28);
     std::cout << "\n=== Phase 2 benchmark (parallel) ===\n";
     std::cout << w << "dataset: "      << csv_path << "\n";
-    std::cout << w << "query: "        << column << " in [" << lo << ", " << hi << "]\n";
+    std::cout << w << "query: "        << predicate_desc(query) << "\n";
     std::cout << w << "reps: "         << reps << "\n";
     std::cout << w << "threads: "      << threads << "\n";
     std::cout << w << "total rows: "   << summary.total_rows   << "\n";
@@ -97,8 +123,7 @@ static void print_report(
 
 static std::string csv_line(
         const std::string& csv_path,
-        const std::string& column,
-        double lo, double hi,
+        const RangeQuery& query,
         int reps, int threads,
         const LoadSummary& summary,
         const Metrics& load_p,
@@ -108,9 +133,7 @@ static std::string csv_line(
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(3);
     oss << csv_path   << ","
-        << column     << ","
-        << lo         << ","
-        << hi         << ","
+        << predicate_desc(query) << ","
         << reps       << ","
         << threads    << ","
         << summary.total_rows   << ","
@@ -128,23 +151,39 @@ static std::string csv_line(
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: benchmark_phase2 <csv_path> [column] [low] [high]"
-                     " [reps] [threads] [--csv]\n"
+        std::cerr << "Usage: benchmark_phase2 <csv_path> <predicates> [reps] [threads] [--csv]\n"
+                  << "  predicates: col:lo:hi[,col:lo:hi,...]\n"
+                  << "  OR old form: col lo hi\n"
                   << "  threads=0  use all available cores (default)\n";
         return 1;
     }
 
     std::string csv_path = argv[1];
-    std::string column   = (argc > 2) ? argv[2] : "trip_distance";
-    double  lo           = (argc > 3) ? std::stod(argv[3]) : 1.0;
-    double  hi           = (argc > 4) ? std::stod(argv[4]) : 3.0;
-    int     reps         = (argc > 5) ? std::stoi(argv[5]) : 10;
-    int     threads      = (argc > 6) ? std::stoi(argv[6]) : 0;
-    bool    csv_mode     = false;
+    int reps    = 10;
+    int threads = 0;
+    bool csv_mode = false;
+    RangeQuery query;
+
+    // Check for --csv flag
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--csv") == 0) csv_mode = true;
 
-    RangeQuery query{column, lo, hi, true};
+    if (argc > 2 && std::strchr(argv[2], ':') != nullptr) {
+        // New multi-column format: "col:lo:hi,col:lo:hi"
+        query = parse_predicates(argv[2]);
+        if (argc > 3 && std::strcmp(argv[3], "--csv") != 0) reps    = std::stoi(argv[3]);
+        if (argc > 4 && std::strcmp(argv[4], "--csv") != 0) threads = std::stoi(argv[4]);
+    } else if (argc > 4) {
+        // Old single-column format: col lo hi [reps] [threads]
+        std::string column = argv[2];
+        double lo = std::stod(argv[3]);
+        double hi = std::stod(argv[4]);
+        query = RangeQuery{column, lo, hi, true};
+        if (argc > 5 && std::strcmp(argv[5], "--csv") != 0) reps    = std::stoi(argv[5]);
+        if (argc > 6 && std::strcmp(argv[6], "--csv") != 0) threads = std::stoi(argv[6]);
+    } else {
+        query = RangeQuery{"trip_distance", 1.0, 3.0, true};
+    }
 
     // Parallel load.
     Metrics load_p;
@@ -183,10 +222,10 @@ int main(int argc, char* argv[]) {
     }
 
     if (csv_mode)
-        std::cout << csv_line(csv_path, column, lo, hi, reps, actual_threads,
+        std::cout << csv_line(csv_path, query, reps, actual_threads,
                                summary, load_p, qparallel, hits_p) << "\n";
     else
-        print_report(csv_path, column, lo, hi, reps, actual_threads,
+        print_report(csv_path, query, reps, actual_threads,
                      summary, load_p, qparallel, hits_p);
 
     return 0;

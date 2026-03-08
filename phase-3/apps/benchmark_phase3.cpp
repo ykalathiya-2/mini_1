@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <omp.h>
+#include <sstream>
 #include <sys/resource.h>
 
 #if defined(__APPLE__)
@@ -27,20 +28,61 @@ static uint64_t footprint_bytes() {
     return 0;
 }
 
+static RangeQuery parse_predicates(const std::string& spec) {
+    RangeQuery q;
+    std::istringstream ss(spec);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        auto p1 = tok.find(':');
+        auto p2 = tok.find(':', p1 + 1);
+        if (p1 == std::string::npos || p2 == std::string::npos) continue;
+        ColumnRange cr;
+        cr.column = tok.substr(0, p1);
+        cr.low    = std::stod(tok.substr(p1 + 1, p2 - p1 - 1));
+        cr.high   = std::stod(tok.substr(p2 + 1));
+        q.predicates.push_back(cr);
+    }
+    return q;
+}
+
+static std::string predicate_desc(const RangeQuery& q) {
+    std::ostringstream oss;
+    for (std::size_t i = 0; i < q.predicates.size(); ++i) {
+        if (i) oss << " AND ";
+        const auto& p = q.predicates[i];
+        oss << p.column << " in [" << p.low << ", " << p.high << "]";
+    }
+    return oss.str();
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: benchmark_phase3 <csv_path> [column] [low] [high]"
-                     " [reps] [threads]\n"
+        std::cerr << "Usage: benchmark_phase3 <csv_path> <predicates> [reps] [threads]\n"
+                  << "  predicates: col:lo:hi[,col:lo:hi,...]\n"
+                  << "  OR old form: col lo hi\n"
                   << "  threads=0  use all available cores (default)\n";
         return 1;
     }
 
     std::string csv_path = argv[1];
-    std::string column   = (argc > 2) ? argv[2] : "trip_distance";
-    double  lo           = (argc > 3) ? std::stod(argv[3]) : 1.0;
-    double  hi           = (argc > 4) ? std::stod(argv[4]) : 3.0;
-    int     reps         = (argc > 5) ? std::stoi(argv[5]) : 10;
-    int     threads      = (argc > 6) ? std::stoi(argv[6]) : 0;
+    int reps    = 10;
+    int threads = 0;
+    RangeQuery query;
+
+    if (argc > 2 && std::strchr(argv[2], ':') != nullptr) {
+        query = parse_predicates(argv[2]);
+        if (argc > 3) reps    = std::stoi(argv[3]);
+        if (argc > 4) threads = std::stoi(argv[4]);
+    } else if (argc > 4) {
+        std::string column = argv[2];
+        double lo = std::stod(argv[3]);
+        double hi = std::stod(argv[4]);
+        query = RangeQuery{column, lo, hi, true};
+        if (argc > 5) reps    = std::stoi(argv[5]);
+        if (argc > 6) threads = std::stoi(argv[6]);
+    } else {
+        query = RangeQuery{"trip_distance", 1.0, 3.0, true};
+    }
 
     int actual_threads = threads;
     if (actual_threads == 0) {
@@ -48,12 +90,10 @@ int main(int argc, char* argv[]) {
         { actual_threads = omp_get_num_threads(); }
     }
 
-    RangeQuery query{column, lo, hi, true};
-
     auto w = std::setw(44);
     std::cout << "\n=== Phase 3 benchmark (SoA) ===\n";
     std::cout << w << "dataset: " << csv_path << "\n";
-    std::cout << w << "query: " << column << " in [" << lo << ", " << hi << "]\n";
+    std::cout << w << "query: " << predicate_desc(query) << "\n";
     std::cout << w << "reps: " << reps << "\n";
     std::cout << w << "threads: " << actual_threads << "\n";
 

@@ -1,47 +1,48 @@
 #include "mini1/query_engine.hpp"
 
-#include <stdexcept>
-
 namespace mini1 {
+
+bool resolve_column(const TaxiTrip& row, const std::string& col, double& out) {
+    if (col == "vendor_id"      || col == "VendorID")      { out = row.vendor_id;             return true; }
+    if (col == "passenger_count")                           { out = row.passenger_count;       return true; }
+    if (col == "trip_distance")                             { out = row.trip_distance;         return true; }
+    if (col == "ratecode_id"    || col == "RatecodeID")     { out = row.ratecode_id;           return true; }
+    if (col == "pu_location_id" || col == "PULocationID")   { out = row.pu_location_id;        return true; }
+    if (col == "do_location_id" || col == "DOLocationID")   { out = row.do_location_id;        return true; }
+    if (col == "payment_type")                              { out = row.payment_type;          return true; }
+    if (col == "fare_amount")                               { out = row.fare_amount;           return true; }
+    if (col == "extra")                                     { out = row.extra;                 return true; }
+    if (col == "mta_tax")                                   { out = row.mta_tax;               return true; }
+    if (col == "tip_amount")                                { out = row.tip_amount;            return true; }
+    if (col == "tolls_amount")                              { out = row.tolls_amount;          return true; }
+    if (col == "improvement_surcharge")                     { out = row.improvement_surcharge; return true; }
+    if (col == "total_amount")                              { out = row.total_amount;          return true; }
+    return false;
+}
 
 std::vector<std::size_t> QueryEngine::range_search(
         const IDataStore& store,
         const RangeQuery& query) const
 {
-    const auto& col = query.column;
-    auto lo = query.low, hi = query.high;
-    bool inc = query.inclusive;
+    const std::size_t n = store.row_count();
+    std::vector<std::size_t> result;
+    result.reserve(n / 100);
 
-    if (col == "vendor_id" || col == "VendorID")
-        return range_scan(store, [](const TaxiTrip& r){ return r.vendor_id; }, lo, hi, inc);
-    if (col == "passenger_count")
-        return range_scan(store, [](const TaxiTrip& r){ return r.passenger_count; }, lo, hi, inc);
-    if (col == "trip_distance")
-        return range_scan(store, [](const TaxiTrip& r){ return r.trip_distance; }, lo, hi, inc);
-    if (col == "RatecodeID" || col == "ratecode_id")
-        return range_scan(store, [](const TaxiTrip& r){ return r.ratecode_id; }, lo, hi, inc);
-    if (col == "PULocationID" || col == "pu_location_id")
-        return range_scan(store, [](const TaxiTrip& r){ return r.pu_location_id; }, lo, hi, inc);
-    if (col == "DOLocationID" || col == "do_location_id")
-        return range_scan(store, [](const TaxiTrip& r){ return r.do_location_id; }, lo, hi, inc);
-    if (col == "payment_type")
-        return range_scan(store, [](const TaxiTrip& r){ return r.payment_type; }, lo, hi, inc);
-    if (col == "fare_amount")
-        return range_scan(store, [](const TaxiTrip& r){ return r.fare_amount; }, lo, hi, inc);
-    if (col == "extra")
-        return range_scan(store, [](const TaxiTrip& r){ return r.extra; }, lo, hi, inc);
-    if (col == "mta_tax")
-        return range_scan(store, [](const TaxiTrip& r){ return r.mta_tax; }, lo, hi, inc);
-    if (col == "tip_amount")
-        return range_scan(store, [](const TaxiTrip& r){ return r.tip_amount; }, lo, hi, inc);
-    if (col == "tolls_amount")
-        return range_scan(store, [](const TaxiTrip& r){ return r.tolls_amount; }, lo, hi, inc);
-    if (col == "improvement_surcharge")
-        return range_scan(store, [](const TaxiTrip& r){ return r.improvement_surcharge; }, lo, hi, inc);
-    if (col == "total_amount")
-        return range_scan(store, [](const TaxiTrip& r){ return r.total_amount; }, lo, hi, inc);
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& row = store.row_at(i);
+        if (!row.valid) continue;
 
-    return {}; // unknown column
+        bool match = true;
+        for (const auto& pred : query.predicates) {
+            double val = 0;
+            if (!resolve_column(row, pred.column, val)) { match = false; break; }
+            bool hit = pred.inclusive ? (val >= pred.low && val <= pred.high)
+                                     : (val >  pred.low && val <  pred.high);
+            if (!hit) { match = false; break; }
+        }
+        if (match) result.push_back(i);
+    }
+    return result;
 }
 
 } // namespace mini1

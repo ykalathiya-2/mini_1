@@ -68,33 +68,59 @@ PhaseMetrics measure(const UsageSnapshot& a, const UsageSnapshot& b, double elap
     return m;
 }
 
+mini1::RangeQuery parse_predicates(const std::string& spec) {
+    mini1::RangeQuery q;
+    std::istringstream ss(spec);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) {
+        auto p1 = tok.find(':');
+        auto p2 = tok.find(':', p1 + 1);
+        if (p1 == std::string::npos || p2 == std::string::npos) continue;
+        mini1::ColumnRange cr;
+        cr.column = tok.substr(0, p1);
+        cr.low    = std::stod(tok.substr(p1 + 1, p2 - p1 - 1));
+        cr.high   = std::stod(tok.substr(p2 + 1));
+        q.predicates.push_back(cr);
+    }
+    return q;
+}
+
+std::string predicate_desc(const mini1::RangeQuery& q) {
+    std::ostringstream o;
+    for (std::size_t i = 0; i < q.predicates.size(); ++i) {
+        if (i) o << " AND ";
+        const auto& p = q.predicates[i];
+        o << p.column << " in [" << p.low << ", " << p.high << "]";
+    }
+    return o.str();
+}
+
 void print_report(const mini1::LoadSummary& sum,
-                  const std::string& col, double lo, double hi,
+                  const mini1::RangeQuery& query,
                   int reps, std::size_t hits,
-                  const PhaseMetrics& load, const PhaseMetrics& query,
+                  const PhaseMetrics& load, const PhaseMetrics& qm,
                   uint64_t overall_rss)
 {
-    double avg_q = reps > 0 ? query.elapsed_ms / reps : 0.0;
+    double avg_q = reps > 0 ? qm.elapsed_ms / reps : 0.0;
     std::cout << std::fixed << std::setprecision(3)
         << "Rows total:           " << sum.total_rows      << "\n"
         << "Rows valid:           " << sum.valid_rows      << "\n"
         << "Rows invalid:         " << sum.invalid_rows    << "\n"
         << "Load time ms:         " << load.elapsed_ms     << "\n"
-        << "Query total ms:       " << query.elapsed_ms    << "\n"
+        << "Query total ms:       " << qm.elapsed_ms       << "\n"
         << "Avg query ms:         " << avg_q               << "\n"
         << "Load CPU user ms:     " << load.cpu_user       << "\n"
         << "Load CPU sys ms:      " << load.cpu_sys        << "\n"
         << "Load CPU total ms:    " << load.cpu_total      << "\n"
-        << "Query CPU user ms:    " << query.cpu_user      << "\n"
-        << "Query CPU sys ms:     " << query.cpu_sys       << "\n"
-        << "Query CPU total ms:   " << query.cpu_total     << "\n"
+        << "Query CPU user ms:    " << qm.cpu_user         << "\n"
+        << "Query CPU sys ms:     " << qm.cpu_sys          << "\n"
+        << "Query CPU total ms:   " << qm.cpu_total        << "\n"
         << "Load peak RSS bytes:  " << load.peak_rss       << "\n"
         << "Load footprint bytes: " << load.footprint      << "\n"
-        << "Query peak RSS bytes: " << query.peak_rss      << "\n"
-        << "Query footprint bytes:" << query.footprint     << "\n"
+        << "Query peak RSS bytes: " << qm.peak_rss         << "\n"
+        << "Query footprint bytes:" << qm.footprint        << "\n"
         << "Overall peak RSS:     " << overall_rss         << "\n"
-        << "Query column:         " << col                 << "\n"
-        << "Range:                [" << lo << ", " << hi << "]\n"
+        << "Query predicates:     " << predicate_desc(query)<< "\n"
         << "Repeats:              " << reps                << "\n"
         << "Last hits:            " << hits                << "\n";
 }
@@ -122,7 +148,9 @@ std::string csv_line(const mini1::LoadSummary& sum,
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: benchmark_phase1 <csv_path> [column low high repeats] [--csv]\n";
+        std::cerr << "Usage: benchmark_phase1 <csv_path> <predicates> [repeats] [--csv]\n"
+                  << "  predicates: col:lo:hi[,col:lo:hi,...]\n"
+                  << "  OR old form: col lo hi\n";
         return 1;
     }
 
@@ -137,15 +165,20 @@ int main(int argc, char** argv) {
     if (args.empty()) { std::cerr << "Missing csv_path.\n"; return 1; }
 
     std::string csv_path = args[0];
-    std::string query_col = "trip_distance";
-    double lo = 1.0, hi = 3.0;
     int reps = 10;
+    mini1::RangeQuery q;
 
-    if (args.size() >= 5) {
-        query_col = args[1];
-        lo   = std::stod(args[2]);
-        hi   = std::stod(args[3]);
-        reps = std::stoi(args[4]);
+    if (args.size() >= 2 && args[1].find(':') != std::string::npos) {
+        // New multi-column format: "col:lo:hi,col:lo:hi"
+        q = parse_predicates(args[1]);
+        if (args.size() >= 3) reps = std::stoi(args[2]);
+    } else if (args.size() >= 4) {
+        // Old single-column format: col lo hi [reps]
+        q = mini1::RangeQuery{args[1], std::stod(args[2]), std::stod(args[3]), true};
+        if (args.size() >= 5) reps = std::stoi(args[4]);
+    } else {
+        // Default single-column query
+        q = mini1::RangeQuery{"trip_distance", 1.0, 3.0, true};
     }
     if (reps < 1) reps = 1;
 
@@ -162,12 +195,12 @@ int main(int argc, char** argv) {
     auto load_m = measure(u0, u1, load_ms);
     auto summary = data.load_summary();
 
-    mini1::RangeQuery q{query_col, lo, hi, true};
+    mini1::RangeQuery q_copy = q;
     auto u2 = snap();
     auto t2 = std::chrono::steady_clock::now();
     std::size_t hits = 0;
     for (int i = 0; i < reps; ++i)
-        hits = data.range_search(q).size();
+        hits = data.range_search(q_copy).size();
     auto t3 = std::chrono::steady_clock::now();
     auto u3 = snap();
     double query_ms = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / 1000.0;
@@ -176,7 +209,7 @@ int main(int argc, char** argv) {
     if (csv_mode)
         std::cout << csv_line(summary, hits, reps, load_m, query_m, u3.rss) << "\n";
     else
-        print_report(summary, query_col, lo, hi, reps, hits, load_m, query_m, u3.rss);
+        print_report(summary, q, reps, hits, load_m, query_m, u3.rss);
 
     return 0;
 }

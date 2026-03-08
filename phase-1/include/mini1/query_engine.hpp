@@ -6,27 +6,9 @@
 
 namespace mini1 {
 
-template <typename Accessor>
-std::vector<std::size_t> range_scan(const IDataStore& store,
-                                    Accessor accessor,
-                                    double low, double high,
-                                    bool inclusive)
-{
-    const std::size_t n = store.row_count();
-    std::vector<std::size_t> result;
-    result.reserve(n / 100);
-
-    for (std::size_t i = 0; i < n; ++i) {
-        const auto& row = store.row_at(i);
-        if (!row.valid) continue;
-
-        double val = static_cast<double>(accessor(row));
-        bool hit = inclusive ? (val >= low && val <= high)
-                             : (val >  low && val <  high);
-        if (hit) result.push_back(i);
-    }
-    return result;
-}
+// Resolve a column name to the corresponding field value on a TaxiTrip.
+// Returns false if the column is unknown.
+bool resolve_column(const TaxiTrip& row, const std::string& col, double& out);
 
 class QueryEngine : public IQueryEngine {
 public:

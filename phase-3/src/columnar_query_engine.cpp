@@ -8,14 +8,59 @@ namespace mini1 {
 
 ColumnarQueryEngine::ColumnarQueryEngine(int threads) : threads_(threads) {}
 
-// Scan a single contiguous column array + valid mask.
-// Only touches sizeof(T)*n + n bytes of memory — for double columns on 20M
-// rows that is 180 MB vs 4+ GB for an AoS full-struct scan.
-template <typename T>
-static std::vector<std::size_t> col_scan(
-        const T* col, const uint8_t* valid, std::size_t n,
-        double low, double high, bool inclusive,
-        int nt) {
+// Resolve a column name to a (base pointer, element size, is_double) triple.
+// int32 columns are cast to double during comparison.
+struct ColRef {
+    const void* data = nullptr;
+    bool is_double   = false;
+};
+
+static ColRef resolve_col(const ColumnarStore& store, const std::string& col) {
+    if (col == "vendor_id"      || col == "VendorID")      return {store.vendor_id.data(),             false};
+    if (col == "passenger_count")                           return {store.passenger_count.data(),       false};
+    if (col == "trip_distance")                             return {store.trip_distance.data(),         true};
+    if (col == "ratecode_id"    || col == "RatecodeID")     return {store.ratecode_id.data(),           false};
+    if (col == "pu_location_id" || col == "PULocationID")   return {store.pu_location_id.data(),        false};
+    if (col == "do_location_id" || col == "DOLocationID")   return {store.do_location_id.data(),        false};
+    if (col == "payment_type")                              return {store.payment_type.data(),          false};
+    if (col == "fare_amount")                               return {store.fare_amount.data(),           true};
+    if (col == "extra")                                     return {store.extra.data(),                 true};
+    if (col == "mta_tax")                                   return {store.mta_tax.data(),               true};
+    if (col == "tip_amount")                                return {store.tip_amount.data(),            true};
+    if (col == "tolls_amount")                              return {store.tolls_amount.data(),          true};
+    if (col == "improvement_surcharge")                     return {store.improvement_surcharge.data(), true};
+    if (col == "total_amount")                              return {store.total_amount.data(),          true};
+    return {};
+}
+
+static inline double read_val(const ColRef& ref, std::size_t i) {
+    if (ref.is_double)
+        return static_cast<const double*>(ref.data)[i];
+    return static_cast<double>(static_cast<const int32_t*>(ref.data)[i]);
+}
+
+std::vector<std::size_t> ColumnarQueryEngine::range_search(
+        const ColumnarStore& store,
+        const RangeQuery& query) const {
+
+    int nt = (threads_ == 0) ? omp_get_max_threads() : threads_;
+    std::size_t n = store.size();
+    const uint8_t* valid = store.valid.data();
+
+    // Pre-resolve all column pointers so inner loop has no string comparisons.
+    struct ResolvedPred {
+        ColRef col;
+        double low;
+        double high;
+        bool   inclusive;
+    };
+    std::vector<ResolvedPred> preds;
+    preds.reserve(query.predicates.size());
+    for (const auto& p : query.predicates) {
+        ColRef cr = resolve_col(store, p.column);
+        if (!cr.data) return {};  // unknown column
+        preds.push_back({cr, p.low, p.high, p.inclusive});
+    }
 
     std::vector<std::size_t> result(n);
     std::atomic<std::size_t> tail{0};
@@ -36,10 +81,15 @@ static std::vector<std::size_t> col_scan(
         #pragma omp for schedule(static)
         for (std::size_t i = 0; i < n; ++i) {
             if (!valid[i]) continue;
-            double v = static_cast<double>(col[i]);
-            bool hit = inclusive ? (v >= low && v <= high)
-                                 : (v >  low && v <  high);
-            if (hit) {
+
+            bool match = true;
+            for (const auto& pred : preds) {
+                double v = read_val(pred.col, i);
+                bool hit = pred.inclusive ? (v >= pred.low && v <= pred.high)
+                                         : (v >  pred.low && v <  pred.high);
+                if (!hit) { match = false; break; }
+            }
+            if (match) {
                 buf[cnt++] = i;
                 if (cnt == BATCH) flush();
             }
@@ -49,50 +99,6 @@ static std::vector<std::size_t> col_scan(
 
     result.resize(tail.load(std::memory_order_relaxed));
     return result;
-}
-
-std::vector<std::size_t> ColumnarQueryEngine::range_search(
-        const ColumnarStore& store,
-        const RangeQuery& query) const {
-
-    const std::string& col = query.column;
-    double low   = query.low;
-    double high  = query.high;
-    bool   incl  = query.inclusive;
-    int    nt    = (threads_ == 0) ? omp_get_max_threads() : threads_;
-    std::size_t n = store.size();
-    const uint8_t* v = store.valid.data();
-
-    if (col == "vendor_id" || col == "VendorID")
-        return col_scan(store.vendor_id.data(), v, n, low, high, incl, nt);
-    if (col == "passenger_count")
-        return col_scan(store.passenger_count.data(), v, n, low, high, incl, nt);
-    if (col == "trip_distance")
-        return col_scan(store.trip_distance.data(), v, n, low, high, incl, nt);
-    if (col == "ratecode_id" || col == "RatecodeID")
-        return col_scan(store.ratecode_id.data(), v, n, low, high, incl, nt);
-    if (col == "pu_location_id" || col == "PULocationID")
-        return col_scan(store.pu_location_id.data(), v, n, low, high, incl, nt);
-    if (col == "do_location_id" || col == "DOLocationID")
-        return col_scan(store.do_location_id.data(), v, n, low, high, incl, nt);
-    if (col == "payment_type")
-        return col_scan(store.payment_type.data(), v, n, low, high, incl, nt);
-    if (col == "fare_amount")
-        return col_scan(store.fare_amount.data(), v, n, low, high, incl, nt);
-    if (col == "extra")
-        return col_scan(store.extra.data(), v, n, low, high, incl, nt);
-    if (col == "mta_tax")
-        return col_scan(store.mta_tax.data(), v, n, low, high, incl, nt);
-    if (col == "tip_amount")
-        return col_scan(store.tip_amount.data(), v, n, low, high, incl, nt);
-    if (col == "tolls_amount")
-        return col_scan(store.tolls_amount.data(), v, n, low, high, incl, nt);
-    if (col == "improvement_surcharge")
-        return col_scan(store.improvement_surcharge.data(), v, n, low, high, incl, nt);
-    if (col == "total_amount")
-        return col_scan(store.total_amount.data(), v, n, low, high, incl, nt);
-
-    return {};
 }
 
 } // namespace mini1

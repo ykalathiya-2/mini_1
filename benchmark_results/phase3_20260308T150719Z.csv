@@ -1,0 +1,2 @@
+timestamp_utc,run,phase,dataset,column,low,high,reps,threads,total_rows,valid_rows,invalid_rows,load_ms,load_footprint_bytes,query_ms,hits
+2026-03-08T15:07:21Z,1,phase-3,/Users/spartan/Downloads/2017_Yellow_Taxi_Trip_Data_20260228.csv,trip_distance,1,3,1,0,,,,,0,,
