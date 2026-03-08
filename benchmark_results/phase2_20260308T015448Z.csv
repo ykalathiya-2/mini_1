@@ -1,0 +1,2 @@
+timestamp_utc,run,phase,dataset,column,low,high,reps,threads,total_rows,valid_rows,invalid_rows,load_parallel_ms,query_parallel_ms,hits,load_cpu_user_ms,load_cpu_sys_ms,load_footprint,query_cpu_total_ms
+2026-03-08T01:54:48Z,1,phase-2,/tmp/taxi_70m.csv,trip_distance,1.000,3.000,1,10,69999999,69999999,0,30935.357,3265.292,34764990,48641.785,18877.277,17388335680,7591.729

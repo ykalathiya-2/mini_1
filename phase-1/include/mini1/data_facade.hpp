@@ -16,6 +16,9 @@ public:
                std::unique_ptr<IQueryEngine> engine);
     ~DataFacade();
 
+    DataFacade(DataFacade&&) noexcept = default;
+    DataFacade& operator=(DataFacade&&) noexcept = default;
+
     bool load(const std::string& csv_path);
 
     std::size_t              row_count() const;

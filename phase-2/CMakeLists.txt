@@ -19,13 +19,10 @@ if(APPLE)
 endif()
 find_package(OpenMP REQUIRED)
 
-# Pull in Phase 1's library and headers.
-add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../phase-1
-    ${CMAKE_BINARY_DIR}/phase1
-)
-
 add_library(mini1_phase2
+    src/csv_reader.cpp
+    src/row_store.cpp
+    src/query_engine.cpp
     src/parallel_csv_reader.cpp
     src/parallel_query_engine.cpp
 )
@@ -38,7 +35,6 @@ target_include_directories(mini1_phase2
 
 target_link_libraries(mini1_phase2
     PUBLIC
-        mini1_phase1
         OpenMP::OpenMP_CXX
 )
 

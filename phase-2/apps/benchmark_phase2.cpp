@@ -1,7 +1,5 @@
-#include "mini1/csv_reader.hpp"
 #include "mini1/parallel_csv_reader.hpp"
 #include "mini1/row_store.hpp"
-#include "mini1/query_engine.hpp"
 #include "mini1/parallel_query_engine.hpp"
 
 #include <chrono>
@@ -62,22 +60,18 @@ static Metrics diff(const Snap& before, const Snap& after, double wall_ms) {
     return m;
 }
 
-static double speedup(double base, double fast) {
-    return (fast > 0) ? base / fast : 0.0;
-}
-
 static void print_report(
         const std::string& csv_path,
         const std::string& column,
         double lo, double hi,
         int reps, int threads,
         const LoadSummary& summary,
-        const Metrics& load_s, const Metrics& load_p,
-        const Metrics& qserial, const Metrics& qparallel,
-        std::size_t hits_s, std::size_t hits_p) {
+        const Metrics& load_p,
+        const Metrics& qparallel,
+        std::size_t hits_p) {
 
     auto w = std::setw(28);
-    std::cout << "\n=== Phase 2 benchmark ===\n";
+    std::cout << "\n=== Phase 2 benchmark (parallel) ===\n";
     std::cout << w << "dataset: "      << csv_path << "\n";
     std::cout << w << "query: "        << column << " in [" << lo << ", " << hi << "]\n";
     std::cout << w << "reps: "         << reps << "\n";
@@ -88,25 +82,16 @@ static void print_report(
 
     std::cout << "\n--- Load ---\n";
     std::cout << std::fixed << std::setprecision(1);
-    std::cout << w << "serial wall ms: "   << load_s.wall_ms   << "\n";
     std::cout << w << "parallel wall ms: " << load_p.wall_ms   << "\n";
-    std::cout << std::setprecision(2);
-    std::cout << w << "load speedup: "     << speedup(load_s.wall_ms, load_p.wall_ms) << "x\n";
-    std::cout << std::setprecision(1);
-    std::cout << w << "serial cpu user ms: "   << load_s.cpu_user_ms << "\n";
-    std::cout << w << "serial cpu sys ms: "    << load_s.cpu_sys_ms  << "\n";
-    std::cout << w << "parallel cpu user ms: " << load_p.cpu_user_ms << "\n";
-    std::cout << w << "parallel cpu sys ms: "  << load_p.cpu_sys_ms  << "\n";
-    std::cout << w << "serial footprint GB: "  << load_s.footprint / 1e9 << "\n";
-    std::cout << w << "parallel footprint GB: "<< load_p.footprint / 1e9 << "\n";
+    std::cout << w << "cpu user ms: "      << load_p.cpu_user_ms << "\n";
+    std::cout << w << "cpu sys ms: "       << load_p.cpu_sys_ms  << "\n";
+    std::cout << w << "footprint GB: "     << load_p.footprint / 1e9 << "\n";
 
     std::cout << "\n--- Query (avg over " << reps << " reps) ---\n";
-    std::cout << w << "serial wall ms: "   << qserial.wall_ms   << "  hits=" << hits_s  << "\n";
-    std::cout << w << "parallel wall ms: " << qparallel.wall_ms << "  hits=" << hits_p  << "\n";
+    std::cout << std::setprecision(1);
+    std::cout << w << "parallel wall ms: " << qparallel.wall_ms << "  hits=" << hits_p << "\n";
     std::cout << std::setprecision(2);
-    std::cout << w << "query speedup: "    << speedup(qserial.wall_ms, qparallel.wall_ms) << "x\n";
-    std::cout << w << "serial cpu total ms: "  << (qserial.cpu_user_ms   + qserial.cpu_sys_ms)   << "\n";
-    std::cout << w << "parallel cpu total ms: "<< (qparallel.cpu_user_ms + qparallel.cpu_sys_ms) << "\n";
+    std::cout << w << "cpu total ms: "     << (qparallel.cpu_user_ms + qparallel.cpu_sys_ms) << "\n";
     std::cout << "\n";
 }
 
@@ -116,9 +101,9 @@ static std::string csv_line(
         double lo, double hi,
         int reps, int threads,
         const LoadSummary& summary,
-        const Metrics& load_s, const Metrics& load_p,
-        const Metrics& qserial, const Metrics& qparallel,
-        std::size_t hits_s, std::size_t hits_p) {
+        const Metrics& load_p,
+        const Metrics& qparallel,
+        std::size_t hits_p) {
 
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(3);
@@ -131,21 +116,12 @@ static std::string csv_line(
         << summary.total_rows   << ","
         << summary.valid_rows   << ","
         << summary.invalid_rows << ","
-        << load_s.wall_ms       << ","
         << load_p.wall_ms       << ","
-        << speedup(load_s.wall_ms, load_p.wall_ms) << ","
-        << qserial.wall_ms      << ","
         << qparallel.wall_ms    << ","
-        << speedup(qserial.wall_ms, qparallel.wall_ms) << ","
-        << hits_s               << ","
         << hits_p               << ","
-        << load_s.cpu_user_ms   << ","
-        << load_s.cpu_sys_ms    << ","
-        << load_s.footprint     << ","
         << load_p.cpu_user_ms   << ","
         << load_p.cpu_sys_ms    << ","
         << load_p.footprint     << ","
-        << (qserial.cpu_user_ms   + qserial.cpu_sys_ms)   << ","
         << (qparallel.cpu_user_ms + qparallel.cpu_sys_ms);
     return oss.str();
 }
@@ -170,52 +146,22 @@ int main(int argc, char* argv[]) {
 
     RangeQuery query{column, lo, hi, true};
 
-    // Serial load (measure then free).
-    Metrics load_s;
-    LoadSummary summary_s;
-    {
-        CsvReader reader;
-        std::vector<TaxiTrip> rows;
-        auto before = snap();
-        auto t0     = Clock::now();
-        reader.read(csv_path, rows, summary_s);
-        double wall = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-        load_s = diff(before, snap(), wall);
-    }  // rows freed here
-
-    // Parallel load (keep for queries).
+    // Parallel load.
     Metrics load_p;
-    LoadSummary summary_p;
+    LoadSummary summary;
     RowStore store;
     {
         ParallelCsvReader reader(threads);
         std::vector<TaxiTrip> rows;
         auto before = snap();
         auto t0     = Clock::now();
-        reader.read(csv_path, rows, summary_p);
+        reader.read(csv_path, rows, summary);
         double wall = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
         load_p = diff(before, snap(), wall);
         store.load(std::move(rows));
     }
 
-    const LoadSummary& summary = summary_p;
-
-    // Serial query.
-    QueryEngine serial_engine;
-    std::size_t hits_s = 0;
-    Metrics qserial;
-    {
-        auto before = snap();
-        auto t0     = Clock::now();
-        for (int i = 0; i < reps; ++i)
-            hits_s = serial_engine.range_search(store, query).size();
-        double wall = std::chrono::duration<double, std::milli>(Clock::now() - t0).count() / reps;
-        qserial = diff(before, snap(), wall);
-        qserial.cpu_user_ms /= reps;
-        qserial.cpu_sys_ms  /= reps;
-    }
-
-    // Parallel query.
+    // Parallel query (hot: data already loaded).
     ParallelQueryEngine parallel_engine(threads);
     std::size_t hits_p = 0;
     Metrics qparallel;
@@ -238,12 +184,10 @@ int main(int argc, char* argv[]) {
 
     if (csv_mode)
         std::cout << csv_line(csv_path, column, lo, hi, reps, actual_threads,
-                               summary, load_s, load_p, qserial, qparallel,
-                               hits_s, hits_p) << "\n";
+                               summary, load_p, qparallel, hits_p) << "\n";
     else
         print_report(csv_path, column, lo, hi, reps, actual_threads,
-                     summary, load_s, load_p, qserial, qparallel,
-                     hits_s, hits_p);
+                     summary, load_p, qparallel, hits_p);
 
     return 0;
 }

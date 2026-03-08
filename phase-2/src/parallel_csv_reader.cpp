@@ -1,7 +1,11 @@
 #include "mini1/parallel_csv_reader.hpp"
 
-#include <fstream>
+#include <cstring>
+#include <fcntl.h>
 #include <omp.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace mini1 {
 
@@ -11,57 +15,57 @@ ParallelCsvReader::ParallelCsvReader(int threads)
 bool ParallelCsvReader::read(const std::string& source_path,
                               std::vector<TaxiTrip>& rows_out,
                               LoadSummary& summary_out) {
-    // Find where the data starts (byte offset just after the header line).
-    std::ifstream probe(source_path);
-    if (!probe) return false;
-    std::string header;
-    if (!std::getline(probe, header)) return false;
-    std::streamoff data_start = probe.tellg();
-    probe.seekg(0, std::ios::end);
-    std::streamoff file_size = probe.tellg();
-    probe.close();
+    int fd = open(source_path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
 
-    if (data_start < 0 || file_size <= data_start) return false;
+    struct stat st{};
+    if (fstat(fd, &st) != 0) { close(fd); return false; }
+    auto file_size = static_cast<std::size_t>(st.st_size);
+    if (file_size == 0) { close(fd); return false; }
+
+    const char* mapped = static_cast<const char*>(
+        mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
+    close(fd);
+    if (mapped == MAP_FAILED) return false;
+
+#ifdef MADV_SEQUENTIAL
+    madvise(const_cast<char*>(mapped), file_size, MADV_SEQUENTIAL);
+#endif
+
+    const char* file_end = mapped + file_size;
+
+    // Skip header line.
+    const char* header_end = static_cast<const char*>(
+        std::memchr(mapped, '\n', file_size));
+    if (!header_end) { munmap(const_cast<char*>(mapped), file_size); return false; }
+
+    const char* data_start = header_end + 1;
+    std::size_t data_size = static_cast<std::size_t>(file_end - data_start);
 
     int nt = (threads_ == 0) ? omp_get_max_threads() : threads_;
-    std::streamoff data_size = file_size - data_start;
 
-    // Pass 1: each thread reads raw lines from its byte chunk.
-    std::vector<std::vector<std::string>> partial_lines(nt);
+    // Pass 1: count newlines per chunk using memchr on mmap'd memory.
     std::vector<std::size_t> counts(nt, 0);
 
     #pragma omp parallel num_threads(nt)
     {
         int tid = omp_get_thread_num();
+        const char* chunk_begin = data_start + (data_size * tid / nt);
+        const char* chunk_end   = data_start + (data_size * (tid + 1) / nt);
 
-        std::streamoff chunk_start = data_start + (data_size * tid / nt);
-        std::streamoff chunk_end   = data_start + (data_size * (tid + 1) / nt);
-
-        std::ifstream stream(source_path);
-        stream.seekg(chunk_start);
-
-        if (tid != 0) {
-            stream.seekg(chunk_start - 1);
-            char prev = '\0';
-            stream.get(prev);
-            if (prev != '\n') {
-                std::string skip;
-                std::getline(stream, skip);
-            }
+        std::size_t nl = 0;
+        const char* p = chunk_begin;
+        while (p < chunk_end) {
+            const char* found = static_cast<const char*>(
+                std::memchr(p, '\n', static_cast<std::size_t>(chunk_end - p)));
+            if (!found) break;
+            ++nl;
+            p = found + 1;
         }
-
-        std::streamoff pos = stream.tellg();
-        std::string line;
-        while (std::getline(stream, line)) {
-            pos += static_cast<std::streamoff>(line.size()) + 1;
-            partial_lines[tid].push_back(std::move(line));
-            if (tid < nt - 1 && pos >= chunk_end)
-                break;
-        }
-        counts[tid] = partial_lines[tid].size();
+        counts[tid] = nl;
     }
 
-    // Prefix sum to get each thread's write offset into the shared array.
+    // Prefix sum for per-thread write offsets.
     std::vector<std::size_t> offsets(nt + 1, 0);
     for (int i = 0; i < nt; ++i)
         offsets[i + 1] = offsets[i] + counts[i];
@@ -73,25 +77,55 @@ bool ParallelCsvReader::read(const std::string& source_path,
     std::vector<std::size_t> partial_valid(nt, 0);
     std::vector<std::size_t> partial_invalid(nt, 0);
 
-    // Pass 2: each thread parses its lines and writes directly into its slice.
+    // Pass 2: each thread parses its chunk directly from mmap'd memory.
     #pragma omp parallel num_threads(nt)
     {
         int tid = omp_get_thread_num();
-        std::size_t idx = offsets[tid];
+        const char* chunk_begin = data_start + (data_size * tid / nt);
+        const char* chunk_end   = data_start + (data_size * (tid + 1) / nt);
 
-        for (auto& raw : partial_lines[tid]) {
-            auto fields  = parse_csv_line(raw);
-            TaxiTrip row = parse_row(fields);
-
-            if (row.valid) ++partial_valid[tid];
-            else           ++partial_invalid[tid];
-
-            rows_out[idx++] = std::move(row);
+        // Align to line boundary (except thread 0).
+        if (tid != 0) {
+            const char* nl = static_cast<const char*>(
+                std::memchr(chunk_begin, '\n', static_cast<std::size_t>(file_end - chunk_begin)));
+            if (nl) chunk_begin = nl + 1;
+            else    chunk_begin = file_end;
         }
 
-        // Free line buffer as soon as this thread is done with it.
-        std::vector<std::string>().swap(partial_lines[tid]);
+        // Find the true end for last partial line in this chunk.
+        if (tid < nt - 1) {
+            const char* nl = static_cast<const char*>(
+                std::memchr(chunk_end, '\n', static_cast<std::size_t>(file_end - chunk_end)));
+            if (nl) chunk_end = nl + 1;
+            else    chunk_end = file_end;
+        } else {
+            chunk_end = file_end;
+        }
+
+        std::size_t idx = offsets[tid];
+        const char* pos = chunk_begin;
+
+        while (pos < chunk_end && idx < total) {
+            const char* nl = static_cast<const char*>(
+                std::memchr(pos, '\n', static_cast<std::size_t>(chunk_end - pos)));
+            const char* line_end = nl ? nl : chunk_end;
+
+            if (line_end == pos) { pos = line_end + 1; continue; }
+
+            const char* row_end = line_end;
+            if (row_end > pos && *(row_end - 1) == '\r') --row_end;
+
+            parse_row_into(pos, row_end, rows_out[idx]);
+
+            if (rows_out[idx].valid) ++partial_valid[tid];
+            else                     ++partial_invalid[tid];
+
+            ++idx;
+            pos = line_end + 1;
+        }
     }
+
+    munmap(const_cast<char*>(mapped), file_size);
 
     summary_out.total_rows   = total;
     summary_out.valid_rows   = 0;

@@ -1,0 +1,11 @@
+timestamp_utc,run,phase,dataset,column,low,high,reps,threads,total_rows,valid_rows,invalid_rows,load_ms,load_footprint_bytes,query_ms,hits
+2026-03-08T01:48:50Z,1,phase-3,/tmp/taxi_70m.csv,trip_distance,1,3,1,0,69999999,69999999
+0,0,27693.2,6200000000,197.7,34764990
+2026-03-08T01:49:18Z,2,phase-3,/tmp/taxi_70m.csv,trip_distance,1,3,1,0,69999999,69999999
+0,0,16683.0,6200000000,208.4,34764990
+2026-03-08T01:49:35Z,3,phase-3,/tmp/taxi_70m.csv,trip_distance,1,3,1,0,69999999,69999999
+0,0,16944.1,6200000000,193.0,34764990
+2026-03-08T01:49:53Z,4,phase-3,/tmp/taxi_70m.csv,trip_distance,1,3,1,0,69999999,69999999
+0,0,16194.6,6200000000,191.8,34764990
+2026-03-08T01:50:09Z,5,phase-3,/tmp/taxi_70m.csv,trip_distance,1,3,1,0,69999999,69999999
+0,0,16780.4,6200000000,193.8,34764990

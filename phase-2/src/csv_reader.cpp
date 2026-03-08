@@ -35,14 +35,12 @@ bool CsvReader::try_parse_double_sv(std::string_view sv, double& value) {
 
 std::string_view CsvReader::next_field(const char*& pos, const char* end) {
     const char* start = pos;
-    // Fast path: unquoted field — use vectorized memchr
     if (start >= end || *start != '"') {
         const char* comma = static_cast<const char*>(std::memchr(pos, ',', static_cast<std::size_t>(end - pos)));
         if (comma) { pos = comma + 1; return {start, static_cast<std::size_t>(comma - start)}; }
         pos = end;
         return {start, static_cast<std::size_t>(end - start)};
     }
-    // Slow path: quoted field
     bool in_quotes = false;
     while (pos < end) {
         char c = *pos;
@@ -118,14 +116,12 @@ bool CsvReader::read(const std::string& source_path,
 
     const char* file_end = mapped + file_size;
 
-    // Skip header line.
     const char* header_end = static_cast<const char*>(
         std::memchr(mapped, '\n', file_size));
     if (!header_end) { munmap(const_cast<char*>(mapped), file_size); return false; }
 
     const char* data_start = header_end + 1;
 
-    // Count newlines to pre-allocate.
     std::size_t total = 0;
     {
         const char* p = data_start;
