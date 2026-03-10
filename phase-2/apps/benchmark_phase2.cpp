@@ -133,7 +133,7 @@ static std::string csv_line(
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(3);
     oss << csv_path   << ","
-        << predicate_desc(query) << ","
+        << '"' << predicate_desc(query) << '"' << ','
         << reps       << ","
         << threads    << ","
         << summary.total_rows   << ","

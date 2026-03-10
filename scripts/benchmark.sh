@@ -149,7 +149,7 @@ query_peak_rss_bytes,query_footprint_bytes,overall_peak_rss_bytes"
 }
 
 write_header_p2() {
-    echo "timestamp_utc,run,phase,dataset,column,low,high,reps,threads,\
+    echo "timestamp_utc,run,phase,dataset,predicates,reps,threads,\
 total_rows,valid_rows,invalid_rows,\
 load_parallel_ms,query_parallel_ms,hits,\
 load_cpu_user_ms,load_cpu_sys_ms,load_footprint,\
@@ -227,7 +227,7 @@ for P in "${PHASE_LIST[@]}"; do
         write_header_p2 > "$OUTFILE"
         for ((i=1; i<=RUNS; i++)); do
             TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            LINE="$("$BINARY" "$CSV_PATH" "$COLUMN" "$LOW" "$HIGH" "$REPS" "$THREADS" --csv)"
+            LINE="$("$BINARY" "$CSV_PATH" "${COLUMN}:${LOW}:${HIGH}" "$REPS" "$THREADS" --csv)"
             echo "${TS},${i},phase-2,${LINE}" >> "$OUTFILE"
             echo "  run $i/$RUNS"
         done
@@ -263,9 +263,11 @@ for P in "${PHASE_LIST[@]}"; do
             }' "$OUTFILE"
             ;;
         2)
-            awk -F',' 'NR>1{l+=$13; q+=$14; n++} END{
+            # Predicates field (col 5) is quoted and may contain commas.
+            # Remove the quoted field first, then parse remaining columns.
+            sed 's/"[^"]*"/PRED/' "$OUTFILE" | awk -F',' 'NR>1{l+=$11; q+=$12; n++} END{
                 printf "  avg load_ms  : %.1f\n  avg query_ms : %.3f\n", (n>0?l/n:0), (n>0?q/n:0)
-            }' "$OUTFILE"
+            }'
             ;;
         3)
             awk -F',' 'NR>1{l+=$13; q+=$15; n++} END{
