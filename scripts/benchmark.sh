@@ -7,9 +7,9 @@
 #
 # Options:
 #   --phases 1,2,3        Comma-separated list of phases to run (default: 1,2,3)
-#   --column <name>       Query column          (default: trip_distance)
-#   --low    <val>        Range low bound       (default: 1)
-#   --high   <val>        Range high bound      (default: 3)
+#   --column <name>       Query column (repeatable for multi-column)
+#   --low    <val>        Range low bound  (one per --column)
+#   --high   <val>        Range high bound (one per --column)
 #   --runs   <n>          Outer benchmark runs  (default: 5)
 #   --reps   <n>          Inner query repeats   (default: 10)
 #   --threads <n>         OMP threads, 0=auto   (default: 0)
@@ -26,6 +26,10 @@
 #
 #   # Phase-2 only, custom column and thread count
 #   ./scripts/benchmark.sh --phases 2 --column fare_amount --low 5 --high 20 --threads 4 /tmp/taxi_5m.csv
+#
+#   # Multi-column predicate
+#   ./scripts/benchmark.sh --column trip_distance --low 1 --high 3 \
+#     --column fare_amount --low 5 --high 20 /tmp/taxi_5m.csv
 # =============================================================================
 
 set -euo pipefail
@@ -35,9 +39,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ---- defaults ----------------------------------------------------------------
 PHASES="1,2,3"
-COLUMN="trip_distance"
-LOW="1"
-HIGH="3"
+COLUMNS=()
+LOWS=()
+HIGHS=()
 RUNS=5
 REPS=10
 THREADS=0
@@ -49,9 +53,9 @@ CSV_PATH=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --phases)   PHASES="$2";  shift 2 ;;
-        --column)   COLUMN="$2";  shift 2 ;;
-        --low)      LOW="$2";     shift 2 ;;
-        --high)     HIGH="$2";    shift 2 ;;
+        --column)   COLUMNS+=("$2"); shift 2 ;;
+        --low)      LOWS+=("$2");    shift 2 ;;
+        --high)     HIGHS+=("$2");   shift 2 ;;
         --runs)     RUNS="$2";    shift 2 ;;
         --reps)     REPS="$2";    shift 2 ;;
         --threads)  THREADS="$2"; shift 2 ;;
@@ -87,6 +91,16 @@ for P in "${PHASE_LIST[@]}"; do
         echo "ERROR: Invalid phase '$P'. Must be 1, 2, or 3." >&2
         exit 1
     fi
+done
+
+# Build predicate string from column/low/high arrays
+if [[ ${#COLUMNS[@]} -eq 0 ]]; then
+    COLUMNS=("trip_distance"); LOWS=("1"); HIGHS=("3")
+fi
+PRED_STRING=""
+for ((j=0; j<${#COLUMNS[@]}; j++)); do
+    [[ -n "$PRED_STRING" ]] && PRED_STRING+=","
+    PRED_STRING+="${COLUMNS[$j]}:${LOWS[$j]}:${HIGHS[$j]}"
 done
 
 mkdir -p "$OUT_DIR"
@@ -139,7 +153,7 @@ build_phase() {
 
 # ---- CSV header writers ------------------------------------------------------
 write_header_p1() {
-    echo "timestamp_utc,run,phase,dataset,column,low,high,reps,\
+    echo "timestamp_utc,run,phase,dataset,predicates,reps,\
 load_ms,query_total_ms,avg_query_ms,hits,\
 total_rows,valid_rows,invalid_rows,\
 load_cpu_user_ms,load_cpu_sys_ms,load_cpu_total_ms,\
@@ -157,7 +171,7 @@ query_cpu_total_ms"
 }
 
 write_header_p3() {
-    echo "timestamp_utc,run,phase,dataset,column,low,high,reps,threads,\
+    echo "timestamp_utc,run,phase,dataset,predicates,reps,threads,\
 total_rows,valid_rows,invalid_rows,\
 load_ms,load_footprint_bytes,\
 query_ms,hits"
@@ -165,9 +179,9 @@ query_ms,hits"
 
 # ---- Phase-3 binary produces human-readable output only; we parse it --------
 run_p3_once() {
-    local binary="$1" csv="$2" col="$3" lo="$4" hi="$5" reps="$6" thr="$7"
+    local binary="$1" csv="$2" pred="$3" reps="$4" thr="$5"
     local out
-    out="$("$binary" "$csv" "$col" "$lo" "$hi" "$reps" "$thr")"
+    out="$("$binary" "$csv" "$pred" "$reps" "$thr")"
 
     local total valid invalid load_ms fp qms hits
     total=$(echo "$out"   | sed -n 's/.*total rows:[[:space:]]*\([0-9]*\).*/\1/p')
@@ -190,7 +204,7 @@ echo "=============================================="
 echo " mini_1 unified benchmark"
 echo " phases  : $PHASES"
 echo " csv     : $CSV_PATH"
-echo " query   : $COLUMN in [$LOW, $HIGH]"
+echo " query   : $PRED_STRING"
 echo " runs    : $RUNS  reps: $REPS  threads: $THREADS"
 echo " output  : $OUT_DIR"
 echo "=============================================="
@@ -218,8 +232,8 @@ for P in "${PHASE_LIST[@]}"; do
         write_header_p1 > "$OUTFILE"
         for ((i=1; i<=RUNS; i++)); do
             TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            LINE="$("$BINARY" "$CSV_PATH" "$COLUMN" "$LOW" "$HIGH" "$REPS" --csv)"
-            echo "${TS},${i},phase-1,${CSV_PATH},${COLUMN},${LOW},${HIGH},${REPS},${LINE}" >> "$OUTFILE"
+            LINE="$("$BINARY" "$CSV_PATH" "$PRED_STRING" "$REPS" --csv)"
+            echo "${TS},${i},phase-1,${CSV_PATH},\"${PRED_STRING}\",${REPS},${LINE}" >> "$OUTFILE"
             echo "  run $i/$RUNS"
         done
         ;;
@@ -227,7 +241,7 @@ for P in "${PHASE_LIST[@]}"; do
         write_header_p2 > "$OUTFILE"
         for ((i=1; i<=RUNS; i++)); do
             TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            LINE="$("$BINARY" "$CSV_PATH" "${COLUMN}:${LOW}:${HIGH}" "$REPS" "$THREADS" --csv)"
+            LINE="$("$BINARY" "$CSV_PATH" "$PRED_STRING" "$REPS" "$THREADS" --csv)"
             echo "${TS},${i},phase-2,${LINE}" >> "$OUTFILE"
             echo "  run $i/$RUNS"
         done
@@ -236,8 +250,8 @@ for P in "${PHASE_LIST[@]}"; do
         write_header_p3 > "$OUTFILE"
         for ((i=1; i<=RUNS; i++)); do
             TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            LINE="$(run_p3_once "$BINARY" "$CSV_PATH" "$COLUMN" "$LOW" "$HIGH" "$REPS" "$THREADS")"
-            echo "${TS},${i},phase-3,${CSV_PATH},${COLUMN},${LOW},${HIGH},${REPS},${THREADS},${LINE}" >> "$OUTFILE"
+            LINE="$(run_p3_once "$BINARY" "$CSV_PATH" "$PRED_STRING" "$REPS" "$THREADS")"
+            echo "${TS},${i},phase-3,${CSV_PATH},\"${PRED_STRING}\",${REPS},${THREADS},${LINE}" >> "$OUTFILE"
             echo "  run $i/$RUNS"
         done
         ;;
@@ -258,9 +272,9 @@ for P in "${PHASE_LIST[@]}"; do
         echo "Phase $P results: $OUTFILE"
         case "$P" in
         1)
-            awk -F',' 'NR>1{s+=$9; q+=$11; n++} END{
+            sed 's/"[^"]*"/PRED/' "$OUTFILE" | awk -F',' 'NR>1{s+=$7; q+=$9; n++} END{
                 printf "  avg load_ms     : %.1f\n  avg avg_query_ms: %.3f\n", (n>0?s/n:0), (n>0?q/n:0)
-            }' "$OUTFILE"
+            }'
             ;;
         2)
             # Predicates field (col 5) is quoted and may contain commas.
@@ -270,9 +284,9 @@ for P in "${PHASE_LIST[@]}"; do
             }'
             ;;
         3)
-            awk -F',' 'NR>1{l+=$13; q+=$15; n++} END{
+            sed 's/"[^"]*"/PRED/' "$OUTFILE" | awk -F',' 'NR>1{l+=$11; q+=$13; n++} END{
                 printf "  avg load_ms  : %.1f\n  avg query_ms : %.3f\n", (n>0?l/n:0), (n>0?q/n:0)
-            }' "$OUTFILE"
+            }'
             ;;
         esac
     fi

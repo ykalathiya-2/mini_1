@@ -1,0 +1,2 @@
+timestamp_utc,run,phase,dataset,predicates,reps,threads,total_rows,valid_rows,invalid_rows,load_ms,load_footprint_bytes,query_ms,hits
+2026-03-10T00:51:35Z,1,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,39020.1,15800000000,28.7,0

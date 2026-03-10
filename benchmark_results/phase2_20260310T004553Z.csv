@@ -1,0 +1,2 @@
+timestamp_utc,run,phase,dataset,predicates,reps,threads,total_rows,valid_rows,invalid_rows,load_parallel_ms,query_parallel_ms,hits,load_cpu_user_ms,load_cpu_sys_ms,load_footprint,query_cpu_total_ms
+2026-03-10T00:47:57Z,1,phase-2,/tmp/taxi_70m.csv,"payment_type in [20, 10000] AND tip_amount in [10, 200]",10,10,69999999,69999999,0,38157.490,2650.200,0,23024.549,13699.190,17387500072,8331.879

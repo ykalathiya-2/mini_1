@@ -1,0 +1,11 @@
+timestamp_utc,run,phase,dataset,predicates,reps,threads,total_rows,valid_rows,invalid_rows,load_ms,load_footprint_bytes,query_ms,hits
+2026-03-10T01:40:57Z,1,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,42474.6,15800000000,42.7,0
+2026-03-10T01:41:52Z,2,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,30533.1,15800000000,32.3,0
+2026-03-10T01:42:29Z,3,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,24082.5,15800000000,31.1,0
+2026-03-10T01:42:58Z,4,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,25110.3,15800000000,32.7,0
+2026-03-10T01:43:31Z,5,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,28986.3,15800000000,31.5,0
+2026-03-10T01:44:08Z,6,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,27586.6,15800000000,32.6,0
+2026-03-10T01:44:42Z,7,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,23366.0,15800000000,29.4,0
+2026-03-10T01:45:09Z,8,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,23535.2,15800000000,30.3,0
+2026-03-10T01:45:38Z,9,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,24686.3,15800000000,33.8,0
+2026-03-10T01:46:08Z,10,phase-3,/tmp/taxi_70m.csv,"payment_type:20:10000,tip_amount:10:200",10,0,69999999,69999999,0,24823.8,15800000000,35.1,0
